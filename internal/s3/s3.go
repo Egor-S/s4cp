@@ -17,9 +17,10 @@ type Uploader struct {
 	bucket string
 }
 
-func NewUploader(endpointUrl, accessKey, secretKey, bucket string) (*Uploader, error) {
+func NewUploader(endpointUrl, region, accessKey, secretKey, bucket string) (*Uploader, error) {
 	cfg, err := config.LoadDefaultConfig(
 		context.TODO(),
+		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
 	)
 	if err != nil {

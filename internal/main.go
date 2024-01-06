@@ -12,6 +12,7 @@ import (
 type Options struct {
 	Bucket          string
 	EndpointUrl     string
+	Region          string
 	AccessKeyId     string
 	SecretAccessKey string
 
@@ -20,7 +21,7 @@ type Options struct {
 }
 
 func BackupToS3(options *Options) error {
-	uploader, err := s3.NewUploader(options.EndpointUrl, options.AccessKeyId, options.SecretAccessKey, options.Bucket)
+	uploader, err := s3.NewUploader(options.EndpointUrl, options.Region, options.AccessKeyId, options.SecretAccessKey, options.Bucket)
 	if err != nil {
 		return err
 	}

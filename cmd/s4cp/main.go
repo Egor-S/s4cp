@@ -15,15 +15,21 @@ func main() {
 		Usage: "Copy SQLite database to S3",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:        "bucket",
-				EnvVars:     []string{"BUCKET"},
-				Destination: &options.Bucket,
-				Required:    true,
-			},
-			&cli.StringFlag{
 				Name:        "endpoint-url",
 				EnvVars:     []string{"ENDPOINT_URL"},
 				Destination: &options.EndpointUrl,
+				Required:    true,
+			},
+			&cli.StringFlag{
+				Name:        "region",
+				EnvVars:     []string{"REGION"},
+				Destination: &options.Region,
+				Required:    true,
+			},
+			&cli.StringFlag{
+				Name:        "bucket",
+				EnvVars:     []string{"BUCKET"},
+				Destination: &options.Bucket,
 				Required:    true,
 			},
 			&cli.StringFlag{
