@@ -47,6 +47,11 @@ func main() {
 				Destination: &options.SecretAccessKey,
 				Required:    true,
 			},
+			&cli.BoolFlag{
+				Name:        "gz",
+				Destination: &options.Gzip,
+				Usage:       "Compress database with gzip before uploading",
+			},
 		},
 		Action: func(context *cli.Context) error {
 			options.Database = context.Args().Get(0)

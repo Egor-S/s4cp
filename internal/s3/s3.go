@@ -3,7 +3,7 @@ package s3
 import (
 	"context"
 	"errors"
-	"os"
+	"io"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/transport/http"
@@ -49,18 +49,12 @@ func (u *Uploader) Exists(key string) (bool, error) {
 	return true, nil
 }
 
-func (u *Uploader) Upload(srcPath, dstKey string) error {
-	file, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
+func (u *Uploader) Upload(src io.Reader, dstKey string) error {
 	// TODO: use upload manager
-	_, err = u.client.PutObject(context.TODO(), &s3.PutObjectInput{
+	_, err := u.client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: aws.String(u.bucket),
 		Key:    aws.String(dstKey),
-		Body:   file,
+		Body:   src,
 	})
 	return err
 }
