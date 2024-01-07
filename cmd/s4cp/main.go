@@ -11,8 +11,11 @@ import (
 func main() {
 	options := &s4cp.Options{}
 	app := &cli.App{
-		Name:  "s4cp",
-		Usage: "Copy SQLite database to S3",
+		Name:            "s4cp",
+		Usage:           "Copy SQLite database to S3",
+		Description:     "PATH - path to SQLite database\n" + "KEY  - destination key in S3 bucket (supports strftime)",
+		ArgsUsage:       "PATH KEY",
+		HideHelpCommand: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "endpoint-url",

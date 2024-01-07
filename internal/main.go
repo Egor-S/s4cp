@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/Egor-S/s4cp/internal/s3"
 	"github.com/Egor-S/s4cp/internal/sqlite"
+	"github.com/itchyny/timefmt-go"
 )
 
 type Options struct {
@@ -21,17 +23,18 @@ type Options struct {
 }
 
 func BackupToS3(options *Options) error {
+	key := timefmt.Format(time.Now(), options.Key)
 	uploader, err := s3.NewUploader(options.EndpointUrl, options.Region, options.AccessKeyId, options.SecretAccessKey, options.Bucket)
 	if err != nil {
 		return err
 	}
 
-	exists, err := uploader.Exists(options.Key)
+	exists, err := uploader.Exists(key)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return fmt.Errorf("key %s already exists", options.Key)
+		return fmt.Errorf("key %s already exists", key)
 	}
 
 	log.Println("Backing up database to temporary file")
@@ -46,8 +49,8 @@ func BackupToS3(options *Options) error {
 		return err
 	}
 
-	log.Println("Uploading to S3")
-	err = uploader.Upload(tempFile.Name(), options.Key)
+	log.Printf("Uploading %s to S3\n", key)
+	err = uploader.Upload(tempFile.Name(), key)
 	if err != nil {
 		return err
 	}

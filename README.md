@@ -13,5 +13,10 @@ s4cp --endpoint-url <endpoint> --region <region> --bucket <bucket> <path> <key>
 ## Docker
 
 ```shell
-docker run -v <volume>:/data --env-file <env file> ghcr.io/egor-s/s4cp:v1 /data/<path> <key> 
+docker run -v <volume>:/data --env-file <env file> ghcr.io/egor-s/s4cp:v2 /data/<path> <key>
 ```
+
+## strftime
+
+`key` supports strftime syntax.
+For example, `s4cp /data/data.db backups/%Y-%m-%d.db` will substitute the current date.
