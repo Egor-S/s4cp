@@ -95,6 +95,26 @@ docker run -d --name s4cp \
   ghcr.io/egor-s/s4cp:3
 ```
 
+Or with Docker Compose, next to the application that owns the database:
+
+```yaml
+services:
+  s4cp:
+    image: ghcr.io/egor-s/s4cp:3
+    restart: unless-stopped
+    user: "1000:1000"
+    volumes:
+      - /srv/app/data:/data
+      - s4cp-state:/var/lib/s4cp
+      - ./s4cp.yaml:/etc/s4cp/config.yaml:ro
+    environment:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+
+volumes:
+  s4cp-state:
+```
+
 The image is built on `gcr.io/distroless/static:nonroot` for amd64 and arm64, and its default command
 is `watch`.
 
