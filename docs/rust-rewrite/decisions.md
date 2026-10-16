@@ -249,5 +249,51 @@ YAML has no option that is both well adopted and maintained → follow-up D36.
 
 ## Deferred / later rounds (blocked on the above or on facts)
 
-- _(none — frontier empty; design summary confirmed. Next step: implementation.)_
+- _(none — frontier empty; design summary confirmed. Implemented on 2026-10-16, see below.)_
 
+
+## Implementation notes (2026-10-16)
+
+The design was implemented as specified. Where the code differs from the text above, or where a fact was checked
+during implementation, it is recorded here.
+
+### Facts verified while building
+
+| Fact | Result |
+|---|---|
+| D9 dbpage snapshot | ✅ A WAL DB whose committed pages exist only in `-wal` gives a full, consistent image. A commit made by another connection during the scan is not seen (unit test `snapshot::tests`). |
+| Readers create an empty `-wal` | ⚠ New finding: opening a WAL DB that has no `-wal` creates a 0-byte one. The prefilter treats an empty WAL as absent, otherwise every run after a clean shutdown would rescan. |
+| SigV4 | ✅ Four AWS documentation vectors pass: GET with Range, PUT with `$` in the key, list with query, `?lifecycle` sub-resource. |
+| Conditional writes | ✅ versitygw and RustFS honour `If-None-Match: *` and `If-Match` on PUT and on CompleteMultipartUpload, and answer conditional GET with 304. ❌ **Garage v2.1.0 silently ignores all three** (it returns 200, not 501). Documented in the README. |
+| ListObjectsV2 field order | ⚠ versitygw sends `<LastModified>` before `<Key>`. The parser handles each `<Contents>` element as a unit. |
+| `cron` crate | ⚠ It counts days of week 1–7 starting on Sunday and has no Vixie DOM/DOW OR rule. `schedule` parses the Unix day-of-week field itself and builds two schedules when both fields are restricted. Tested. |
+| MinIO in CI | ❌ `minio/minio` (Docker Hub) and `quay.io/minio/minio` can no longer be pulled. CI uses **versitygw + RustFS** instead (D31). |
+| Budgets (D30) | ✅ The static musl binary is 8.1 MB (x86_64). The image is 18.4 MB. Max RSS: 14 MB for a full backup of a 1 GB DB (256k pages), 13 MB for a delta, 11 MB for a restore. A `watch` container under `--memory 128m` peaked at about 13 MB. |
+
+### Deviations and additions
+
+- **Modules (D35):** besides the eight planned modules there are `backup` (the engine), `store` (a storage trait
+  plus a `file://` directory store used by tests and for local copies) and `util`.
+- **Crates (D33):** `libc` was added for the SIGTERM/SIGINT handler. It was already in the tree transitively.
+  `watch` finishes the current job and exits; a second signal exits at once. Without a handler, PID 1 in a container ignores SIGTERM.
+  `serde_json` was added for the catalog metadata. chrono's `serde` feature is enabled.
+- **Config:** a top-level `defaults:` block holds per-database settings shared by all databases.
+  Unknown keys are rejected. The default config path is `/etc/s4cp/config.yaml`.
+- **Data object ids:** `<chain>/<seq:06>`. The chain id is `YYYYMMDDTHHMMSSZ`, bumped by a second when needed so it stays unique.
+- **Orphaned data objects (D12/D27):** if the catalog PUT fails after the data PUT, the data object is deleted
+  best-effort. If a later data PUT hits 412 on an unreferenced object older than one hour, s4cp treats it as such a
+  leftover and replaces it; a newer one aborts the run as a possible concurrent writer.
+  `prune` sweeps unreferenced `*.s4` objects older than one hour.
+- **Retention failures** after a successful backup are logged as warnings and retried after the next backup.
+- **Spool files** are named `s4cp-<pid>-*`. On startup, files left by dead PIDs (or by our own PID from an earlier
+  container life) are deleted.
+- **Source connection:** opened read-write without create (falling back to read-only), with `query_only` set and
+  `SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`, so s4cp never checkpoints or deletes the application's WAL.
+- **Restore `--force`** also deletes the destination's `-wal`, `-shm` and `-journal`. A stale WAL would otherwise be
+  replayed over the restored image.
+
+### Not verified locally
+
+- The multi-arch image push and the GitHub Actions run. The workflow passes actionlint, and an amd64 image was built
+  and run locally. The aarch64 binary was cross-built with zig; it was not executed.
+- AWS S3, R2, B2 and Hetzner behaviour. The ⚠ items for B2 and Hetzner remain open.

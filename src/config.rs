@@ -384,6 +384,23 @@ databases:
     }
 
     #[test]
+    fn example_config_is_valid() {
+        for v in [
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "R2_ACCESS_KEY_ID",
+            "R2_SECRET_ACCESS_KEY",
+        ] {
+            unsafe { std::env::set_var(v, "x") };
+        }
+        let c = FileConfig::parse(include_str!("../config.example.yaml")).unwrap();
+        let app = c.db("app").unwrap();
+        assert_eq!(app.targets.len(), 2);
+        assert_eq!(app.policy.keep_full, Some(7));
+        assert_eq!(c.db("analytics").unwrap().policy.keep_full, Some(3));
+    }
+
+    #[test]
     fn rejects_bad_config() {
         assert!(FileConfig::parse("targets:\n  a:\n    url: s3://b\n    bogus: 1\n").is_err());
         assert!(
