@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, rust-rewrite]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # MinIO no longer publishes images; versitygw and RustFS both implement conditional writes.
+      - name: Start S3 servers
+        run: |
+          docker run -d --name vgw -p 7070:7070 -e ROOT_ACCESS_KEY=testkey -e ROOT_SECRET_KEY=testsecret \
+            --entrypoint sh versity/versitygw:latest -c "mkdir -p /tmp/vgw && exec versitygw posix /tmp/vgw"
+          docker run -d --name rustfs -p 9000:9000 -e RUSTFS_ACCESS_KEY=testkey -e RUSTFS_SECRET_KEY=testsecret \
+            rustfs/rustfs:latest /data
+          for port in 7070 9000; do
+            timeout 60 sh -c "until curl -s -o /dev/null http://localhost:$port/; do sleep 1; done"
+          done
+
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Unit and property tests
+        run: cargo test --locked
+        env:
+          S4CP_PROPTEST_SEEDS: "24"
+      - name: Live S3 tests (versitygw)
+        run: cargo test --locked live_
+        env:
+          S4CP_TEST_S3_ENDPOINT: http://localhost:7070
+          S4CP_TEST_S3_KEY: testkey
+          S4CP_TEST_S3_SECRET: testsecret
+      - name: Live S3 tests (RustFS)
+        run: cargo test --locked live_
+        env:
+          S4CP_TEST_S3_ENDPOINT: http://localhost:9000
+          S4CP_TEST_S3_KEY: testkey
+          S4CP_TEST_S3_SECRET: testsecret
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "${GITHUB_ENV}"
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (amd64)
+        run: |
+          docker buildx build --load --platform linux/amd64 -t s4cp:ci .
+          docker run --rm s4cp:ci --version

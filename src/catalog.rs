@@ -157,10 +157,12 @@ impl Catalog {
             .ok_or_else(|| crate::util::msg(format!("no backup at or before {ts}")))
     }
 
+    #[cfg(test)]
     pub fn write_to<W: Write>(&self, w: W) -> Result<()> {
         write_parts(&self.meta, &self.hashes, w)
     }
 
+    #[cfg(test)]
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut v = Vec::with_capacity(CATALOG_HEADER_LEN + 1024 + self.hashes.len() * 8);
         self.write_to(&mut v)?;

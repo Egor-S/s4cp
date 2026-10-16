@@ -145,7 +145,6 @@ fn run_scenario(seed: u64, stores: Vec<Arc<dyn Store>>, with_state: bool) {
         let force = rng.chance(5);
         let res = backup::backup(&job, &dirs, force).unwrap();
         if with_state && rng.chance(20) {
-
             // Unchanged database: second run must be a no-op.
             let res2 = backup::backup(&job, &dirs, false).unwrap();
             assert!(
@@ -289,4 +288,3 @@ fn restore_refuses_existing_and_detects_corruption() {
     assert!(!dest.exists());
     assert!(!dir.path().join("out.db.s4cp-tmp").exists());
 }
-

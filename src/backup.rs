@@ -1,7 +1,7 @@
 //! The backup engine: one scan per database, a spool file per target, independent per-target uploads.
 
 use std::fs;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use crate::format::{FLAG_FULL, Header, NO_PARENT, ObjectWriter, VERSION, page_ha
 use crate::schedule::Cron;
 use crate::snapshot::{self, DbStat, Snapshot};
 use crate::store::{Body, Cond, Get, Store, StoreError, join_key};
-use crate::util::{Context, Error, Result, find_cause, human_bytes, msg};
+use crate::util::{Context, Error, Result, find_cause, human_bytes};
 
 #[derive(Debug, Clone)]
 pub struct Policy {
@@ -187,6 +187,7 @@ pub fn load_catalog(store: &dyn Store, db: &str, cache: Option<&Path>) -> Result
     Ok(loaded)
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Writes a catalog (meta + hashes) with the guard implied by `prev_etag`/`exists`; updates the cache.
 pub fn write_catalog(
     store: &dyn Store,
@@ -687,7 +688,8 @@ pub fn retain(
         store.delete(k).with_context(|| format!("deleting {k}"))?;
     }
     info!(
-        "{db}: retention removed {} chain(s) ({} objects)",
+        "{db} @ {}: retention removed {} chain(s) ({} objects)",
+        store.describe(),
         drop_chains.len(),
         keys.len()
     );
@@ -700,12 +702,4 @@ pub fn is_conflict(e: &Error) -> bool {
         find_cause::<StoreError>(&**e),
         Some(StoreError::PreconditionFailed(_))
     )
-}
-
-/// Reads a whole object into memory-free streaming form, for callers that need a body reader.
-pub fn open_object(store: &dyn Store, key: &str) -> Result<Box<dyn Read + Send>> {
-    match store.get(key, None)? {
-        Get::Found { body, .. } => Ok(body),
-        _ => Err(msg(format!("{key}: object missing"))),
-    }
 }

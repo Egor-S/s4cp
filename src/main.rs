@@ -1,5 +1,7 @@
 mod backup;
 mod catalog;
+mod cli;
+mod config;
 #[cfg(test)]
 mod e2e_tests;
 mod format;
@@ -10,4 +12,6 @@ mod snapshot;
 mod store;
 mod util;
 
-fn main() {}
+fn main() {
+    std::process::exit(cli::main());
+}

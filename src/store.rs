@@ -18,18 +18,10 @@ pub enum Cond {
 }
 
 pub enum Body<'a> {
+    #[allow(dead_code)] // used by tests
     Bytes(&'a [u8]),
     /// A whole file of the given length, read with positional reads (so retries can re-read it).
     File(&'a File, u64),
-}
-
-impl Body<'_> {
-    pub fn len(&self) -> u64 {
-        match self {
-            Body::Bytes(b) => b.len() as u64,
-            Body::File(_, n) => *n,
-        }
-    }
 }
 
 pub enum Get {
@@ -47,6 +39,7 @@ pub struct ObjInfo {
     /// Relative to the store root.
     pub key: String,
     pub size: u64,
+    pub last_modified: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Errors callers need to tell apart.
@@ -239,9 +232,11 @@ impl Store for FsStore {
                 if ft.is_dir() {
                     walk(&ent.path(), &key, out)?;
                 } else {
+                    let m = ent.metadata()?;
                     out.push(ObjInfo {
                         key,
-                        size: ent.metadata()?.len(),
+                        size: m.len(),
+                        last_modified: m.modified().ok().map(chrono::DateTime::<chrono::Utc>::from),
                     });
                 }
             }
@@ -257,10 +252,19 @@ impl Store for FsStore {
     fn delete(&self, key: &str) -> Result<()> {
         let p = self.path(key)?;
         match fs::remove_file(&p) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
+        // Remove now-empty parent directories (object stores have no directories).
+        let mut dir = p.parent();
+        while let Some(d) = dir {
+            if d == self.root || fs::remove_dir(d).is_err() {
+                break;
+            }
+            dir = d.parent();
+        }
+        Ok(())
     }
 }
 

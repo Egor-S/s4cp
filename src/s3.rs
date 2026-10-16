@@ -101,6 +101,7 @@ fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
 
 /// SigV4 signer. `headers` must already contain every header to sign (including host,
 /// x-amz-date and x-amz-content-sha256). Returns the Authorization header value.
+#[allow(clippy::too_many_arguments)]
 pub fn sign_v4(
     access_key: &str,
     secret: &str,
@@ -194,11 +195,11 @@ fn xml_leaves(body: &[u8]) -> Result<Vec<(String, String)>> {
                     s.push_str(&c.xml10_content());
                 }
             }
-            Event::End(_) => {
-                if let Some(leaf) = cur.take() {
-                    out.push(leaf);
-                }
-            }
+            Event::End(e) => match cur.take() {
+                Some(leaf) => out.push(leaf),
+                // Closing tag of a container element: emitted as ("/Name", "").
+                None => out.push((format!("/{}", e.local_name().as_ref()), String::new())),
+            },
             Event::Eof => break,
             _ => {}
         }
@@ -552,6 +553,7 @@ impl S3Store {
 }
 
 impl S3Store {
+    #[cfg(test)]
     /// Creates the bucket (used by tests; s4cp never creates buckets in normal operation).
     pub fn create_bucket(&self) -> Result<()> {
         let r = self.send(&Req {
@@ -692,23 +694,37 @@ impl Store for S3Store {
                 .read_to_vec()?;
             let mut truncated = false;
             token = None;
+            // Fields inside <Contents> come in any order (versitygw sends LastModified first).
+            let mut cur = ObjInfo {
+                key: String::new(),
+                size: 0,
+                last_modified: None,
+            };
             for (k, v) in xml_leaves(&body)? {
                 match k.as_str() {
                     "Key" => {
-                        let rel = if base.is_empty() {
-                            v
-                        } else {
-                            v.strip_prefix(&format!("{base}/"))
+                        cur.key = match base.is_empty() {
+                            true => v,
+                            false => v
+                                .strip_prefix(&format!("{base}/"))
                                 .unwrap_or(&v)
-                                .to_string()
-                        };
-                        out.push(ObjInfo { key: rel, size: 0 });
-                    }
-                    "Size" => {
-                        if let Some(o) = out.last_mut() {
-                            o.size = v.parse().unwrap_or(0);
+                                .to_string(),
                         }
                     }
+                    "Size" => cur.size = v.parse().unwrap_or(0),
+                    "LastModified" => {
+                        cur.last_modified = chrono::DateTime::parse_from_rfc3339(&v)
+                            .ok()
+                            .map(|t| t.with_timezone(&Utc))
+                    }
+                    "/Contents" => out.push(std::mem::replace(
+                        &mut cur,
+                        ObjInfo {
+                            key: String::new(),
+                            size: 0,
+                            last_modified: None,
+                        },
+                    )),
                     "IsTruncated" => truncated = v == "true",
                     "NextContinuationToken" => token = Some(v),
                     _ => {}
@@ -871,26 +887,22 @@ pub mod tests {
             .unwrap();
         assert!(e1.is_some(), "PUT returned no ETag");
         let e1 = e1.unwrap();
-        if guards {
-            let err = s
-                .put("a b+c/obj", Body::Bytes(b"x"), &Cond::Absent)
-                .unwrap_err();
-            assert!(
-                crate::util::find_cause::<StoreError>(&*err).is_some(),
-                "If-None-Match ignored: {err}"
-            );
-            let err = s
-                .put(
-                    "a b+c/obj",
-                    Body::Bytes(b"x"),
-                    &Cond::Match("\"0123\"".into()),
-                )
-                .unwrap_err();
-            assert!(
-                crate::util::find_cause::<StoreError>(&*err).is_some(),
-                "If-Match ignored: {err}"
-            );
+        // Collect every ignored guard so one run reports a provider's full behaviour.
+        let mut ignored = Vec::new();
+        if s.put("a b+c/obj", Body::Bytes(b"x"), &Cond::Absent).is_ok() {
+            ignored.push("If-None-Match: * on PUT");
         }
+        let e1 = match s.put(
+            "a b+c/obj",
+            Body::Bytes(b"hello world"),
+            &Cond::Match("\"0123\"".into()),
+        ) {
+            Ok(e) => {
+                ignored.push("If-Match on PUT");
+                e.unwrap()
+            }
+            Err(_) => e1,
+        };
         let e2 = s
             .put(
                 "a b+c/obj",
@@ -927,6 +939,10 @@ pub mod tests {
             (0..7).map(|i| format!("many/{i:02}")).collect::<Vec<_>>()
         );
         assert!(l.iter().all(|o| o.size == 1));
+        assert!(l.iter().all(|o| {
+            o.last_modified
+                .is_some_and(|t| (Utc::now() - t).num_minutes().abs() < 10)
+        }));
         // Multipart path with a small threshold: 11 MiB in 5 MiB parts.
         s.multipart_threshold = 1;
         s.min_part_size = 5 << 20;
@@ -935,12 +951,10 @@ pub mod tests {
         std::io::Write::write_all(&mut f, &data).unwrap();
         s.put("big", Body::File(&f, data.len() as u64), &Cond::Absent)
             .unwrap();
-        if guards {
-            assert!(
-                s.put("big", Body::File(&f, data.len() as u64), &Cond::Absent)
-                    .is_err(),
-                "multipart If-None-Match ignored"
-            );
+        if s.put("big", Body::File(&f, data.len() as u64), &Cond::Absent)
+            .is_ok()
+        {
+            ignored.push("If-None-Match: * on CompleteMultipartUpload");
         }
         assert_eq!(s.get_range("big", -3, 0).unwrap(), &data[data.len() - 3..]);
         for o in s.list("").unwrap() {
@@ -948,6 +962,13 @@ pub mod tests {
         }
         assert!(s.list("").unwrap().is_empty());
         s.delete("missing").unwrap();
+        assert!(
+            !guards || ignored.is_empty(),
+            "provider ignores conditional writes: {ignored:?}"
+        );
+        if !ignored.is_empty() {
+            eprintln!("provider ignores: {ignored:?}");
+        }
     }
 
     #[test]
@@ -957,6 +978,7 @@ pub mod tests {
         let x = br#"<?xml version="1.0"?><ListBucketResult><IsTruncated>true</IsTruncated><Contents><Key>a&amp;b</Key><Size>3</Size></Contents><NextContinuationToken>t/=</NextContinuationToken></ListBucketResult>"#;
         let l = xml_leaves(x).unwrap();
         assert_eq!(l[1], ("Key".to_string(), "a&b".to_string()));
-        assert_eq!(l[3].1, "t/=");
+        assert_eq!(l[3].0, "/Contents");
+        assert_eq!(l[4].1, "t/=");
     }
 }

@@ -10,12 +10,13 @@ clap = { version = "4.6.7", features = ["derive", "env"] }
 cron = "0.17.0"
 env_logger = { version = "0.11.11", default-features = false }
 hmac = "0.13.0"
+libc = "0.2.190"
 log = "0.4.34"
 quick-xml = "0.42.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde-saphyr = "2.0.0"
+serde-saphyr = { version = "2.0.0", default-features = false, features = ["deserialize"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 tempfile = "3.27.0"
