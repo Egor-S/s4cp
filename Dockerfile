@@ -11,7 +11,7 @@ RUN case "$TARGETARCH" in \
 COPY Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 COPY src src
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/target,id=s4cp-target-$TARGETARCH \
     cargo zigbuild --release --locked --target "$(cat /rust-target)" \
     && cp "target/$(cat /rust-target)/release/s4cp" /s4cp \
