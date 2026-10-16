@@ -1,0 +1,77 @@
+name: Build Docker image
+run-name: Build ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (vX.Y.Z also publishes X.Y, X and latest)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Semver tags (v3.1.0) fan out to 3.1.0, 3.1, 3 and latest; prereleases (v3.1.0-rc.1) only
+      # get their own version. Anything else (e.g. a manual "dev") is pushed verbatim.
+      - name: Determine image tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+          echo "IMAGE_TAG=$tag" >>"$GITHUB_ENV"
+          if [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "IS_SEMVER=true" >>"$GITHUB_ENV"
+          else
+            echo "IS_SEMVER=false" >>"$GITHUB_ENV"
+          fi
+
+      - name: Lowercase image name
+        run: |
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >>"$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=${{ env.IS_SEMVER == 'true' && 'auto' || 'false' }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.IMAGE_TAG }},enable=${{ env.IS_SEMVER }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.IMAGE_TAG }},enable=${{ env.IS_SEMVER }}
+            type=semver,pattern={{major}},value=${{ env.IMAGE_TAG }},enable=${{ env.IS_SEMVER }}
+            type=raw,value=${{ env.IMAGE_TAG }},enable=${{ env.IS_SEMVER != 'true' }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,55 @@
+# s4cp configuration. Precedence: command line > environment > this file > defaults.
+# ${VAR} is replaced from the environment (unset = error); ${VAR:-default} falls back; $$ is a literal $.
+
+# Prefilter state + catalog cache. Mount a volume here in Docker; losing it only costs a rescan + GET.
+state_dir: /var/lib/s4cp
+# Spool files (one compressed backup per target while uploading).
+spool_dir: /tmp
+# error | warn | info | debug | trace (also S4CP_LOG_LEVEL, --log-level)
+log_level: info
+# text | json (also S4CP_LOG_FORMAT, --log-format)
+log_format: text
+
+# Defaults for every database (each database can override them).
+defaults:
+  # 5-field cron (minute hour day-of-month month day-of-week) used by `s4cp watch`.
+  schedule: "0 * * * *"
+  # IANA timezone for schedule and full_schedule (default UTC).
+  timezone: UTC
+  # Optional: start a new chain (full backup) after this schedule fires.
+  # full_schedule: "0 3 * * 0"
+  # Max deltas after a full before the next full (default 24).
+  max_chain: 24
+  # New full when the chain's deltas total more than this fraction of its full (default 0.5).
+  max_chain_ratio: 0.5
+  # Keep the newest N chains; older ones are deleted after each backup (default: keep all).
+  keep_full: 7
+
+# Named targets, in order: the first one listed is the default for restore/ls/verify.
+targets:
+  aws:
+    url: s3://my-bucket/s4cp            # s3://bucket[/prefix] or file:///path
+    region: eu-central-1                # default: AWS_REGION, then us-east-1
+    # endpoint defaults to AWS_ENDPOINT_URL, then https://s3.<region>.amazonaws.com
+    access_key_id: ${AWS_ACCESS_KEY_ID} # default: AWS_ACCESS_KEY_ID
+    secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+    # session_token: ${AWS_SESSION_TOKEN}
+  r2:
+    url: s3://backups/s4cp
+    endpoint: https://<account-id>.r2.cloudflarestorage.com
+    region: auto
+    access_key_id: ${R2_ACCESS_KEY_ID}
+    secret_access_key: ${R2_SECRET_ACCESS_KEY}
+    path_style: true                    # default: true with a custom endpoint, false on AWS
+
+databases:
+  app:
+    path: /data/app.db
+    schedule: "*/15 * * * *"
+    ping_url: https://hc-ping.com/<uuid> # GETs <url>/start, <url> (success), <url>/fail
+  analytics:
+    path: /data/analytics.db
+    targets: [r2]                       # default: all targets
+    schedule: "30 2 * * *"
+    timezone: Europe/Berlin
+    keep_full: 3
