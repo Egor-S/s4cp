@@ -201,8 +201,10 @@ impl Catalog {
                 .context("reading catalog hash table")?;
             hashes.extend(
                 buf[..n]
-                    .chunks_exact(8)
-                    .map(|c| u64::from_le_bytes(c.try_into().unwrap())),
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| u64::from_le_bytes(*c)),
             );
             left -= n;
         }
