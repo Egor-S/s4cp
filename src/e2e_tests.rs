@@ -288,3 +288,84 @@ fn restore_refuses_existing_and_detects_corruption() {
     assert!(!dest.exists());
     assert!(!dir.path().join("out.db.s4cp-tmp").exists());
 }
+
+#[test]
+fn state_is_keyed_by_target_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("app.db");
+    let c = Connection::open(&db).unwrap();
+    c.execute_batch("CREATE TABLE t(v); INSERT INTO t VALUES (randomblob(5000));")
+        .unwrap();
+    let dirs = Dirs {
+        state_dir: Some(dir.path().join("state")),
+        spool_dir: dir.path().to_path_buf(),
+    };
+    // Same target name, different locations (e.g. two ad-hoc URLs); the database doesn't change in between.
+    for loc in ["a", "b"] {
+        let store: Arc<dyn Store> = fs_store(&dir, loc);
+        let job = Job {
+            db: "app".into(),
+            path: db.clone(),
+            policy: Policy::default(),
+            targets: vec![Target {
+                name: "adhoc".into(),
+                store: store.clone(),
+            }],
+        };
+        let res = backup::backup(&job, &dirs, false).unwrap();
+        assert!(
+            matches!(res[0].1, Ok(Outcome::Uploaded { .. })),
+            "{loc}: {:?}",
+            res[0].1
+        );
+        assert!(load_catalog(&*store, "app", None).unwrap().exists);
+    }
+}
+
+#[test]
+fn restore_refuses_leftover_wal() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("app.db");
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch("CREATE TABLE t(v); INSERT INTO t VALUES (1);")
+        .unwrap();
+    let store: Arc<dyn Store> = fs_store(&dir, "s");
+    let dirs = Dirs {
+        state_dir: None,
+        spool_dir: dir.path().to_path_buf(),
+    };
+    let job = Job {
+        db: "app".into(),
+        path: db.clone(),
+        policy: Policy::default(),
+        targets: vec![Target {
+            name: "s".into(),
+            store: store.clone(),
+        }],
+    };
+    backup::backup(&job, &dirs, false).unwrap();
+    let cat = load_catalog(&*store, "app", None).unwrap().catalog;
+    let e = cat.latest().unwrap().clone();
+    let dest = dir.path().join("out.db");
+    std::fs::write(dir.path().join("out.db-wal"), b"stale").unwrap();
+    let opts = Options {
+        force: false,
+        integrity_check: true,
+    };
+    let err = restore::restore(&*store, "app", &cat, &e, &dest, &opts).unwrap_err();
+    assert!(err.to_string().contains("-wal"), "{err}");
+    restore::restore(
+        &*store,
+        "app",
+        &cat,
+        &e,
+        &dest,
+        &Options {
+            force: true,
+            integrity_check: true,
+        },
+    )
+    .unwrap();
+    assert!(!dir.path().join("out.db-wal").exists());
+}

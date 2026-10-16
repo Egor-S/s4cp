@@ -136,11 +136,23 @@ pub fn restore(
     dest: &Path,
     opts: &Options,
 ) -> Result<()> {
-    if dest.exists() && !opts.force {
-        bail!(
-            "{} already exists; use --force to replace it",
-            dest.display()
-        );
+    if !opts.force {
+        if dest.exists() {
+            bail!(
+                "{} already exists; use --force to replace it",
+                dest.display()
+            );
+        }
+        // SQLite would replay a leftover WAL/journal over the restored image.
+        for suffix in ["-wal", "-journal"] {
+            let p = sibling(dest, suffix);
+            if p.exists() {
+                bail!(
+                    "{} exists (left over from a deleted database); use --force to remove it",
+                    p.display()
+                );
+            }
+        }
     }
     let tmp = sibling(dest, ".s4cp-tmp");
     let file = OpenOptions::new()

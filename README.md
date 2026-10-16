@@ -78,8 +78,10 @@ databases:
 | `prune [DB\|URL…] [--keep-full N] [--dry-run]` | Apply retention and delete orphaned objects older than an hour |
 | `inspect <file\|s3://bucket/key> [--pages] [--json]` | Show a catalog or data object. Remote data objects need only 2 ranged GETs. |
 
-`restore --force` replaces an existing file and deletes its `-wal`, `-shm` and `-journal` files.
-Stop the application before you do this.
+`restore` refuses to overwrite an existing database. It also refuses when a leftover `-wal` or `-journal`
+file sits next to the destination, because SQLite would replay it over the restored image.
+`restore --force` replaces the file and deletes its `-wal`, `-shm` and `-journal` files. Stop the
+application before you do this.
 
 ## Docker
 

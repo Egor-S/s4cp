@@ -183,7 +183,12 @@ enum Cmd {
 
 fn init_logging(level: &str, json: bool) {
     let mut b = env_logger::Builder::new();
-    b.parse_filters(level);
+    // A plain level applies to s4cp; dependencies (rustls, ureq) stay at warn unless asked for by name.
+    if ["error", "warn", "info", "debug", "trace"].contains(&level.to_ascii_lowercase().as_str()) {
+        b.parse_filters(&format!("warn,s4cp={level}"));
+    } else {
+        b.parse_filters(level);
+    }
     b.target(env_logger::Target::Stderr);
     if json {
         b.format(|f, r| {
@@ -608,7 +613,7 @@ fn last_ok(ctx: &Ctx, db: &Db) -> Option<DateTime<Utc>> {
     // The oldest success across targets: a target that never succeeded makes the db overdue.
     let mut out: Option<DateTime<Utc>> = None;
     for t in &db.targets {
-        let p = state_path(&ctx.dirs, &t.name, &db.name)?;
+        let p = state_path(&ctx.dirs, t, &db.name)?;
         let t = backup::read_prefilter(&p)?.last_ok;
         out = Some(out.map_or(t, |o| o.min(t)));
     }
@@ -888,7 +893,7 @@ fn cmd_prune(
 }
 
 fn prune_one(ctx: &Ctx, db: &str, t: &Target, keep: Option<u32>, dry_run: bool) -> Result<()> {
-    let cache = state_path(&ctx.dirs, &t.name, db);
+    let cache = state_path(&ctx.dirs, t, db);
     let loaded = load_catalog(&*t.store, db, cache.as_deref())?;
     let mut cat = loaded.catalog;
     if !loaded.exists {

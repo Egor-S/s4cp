@@ -24,12 +24,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # MinIO no longer publishes images; versitygw and RustFS both implement conditional writes.
+      # Pinned to the versions verified locally (versitygw v1.9.0, RustFS as of 2026-10-16).
       - name: Start S3 servers
         run: |
           docker run -d --name vgw -p 7070:7070 -e ROOT_ACCESS_KEY=testkey -e ROOT_SECRET_KEY=testsecret \
-            --entrypoint sh versity/versitygw:latest -c "mkdir -p /tmp/vgw && exec versitygw posix /tmp/vgw"
+            --entrypoint sh versity/versitygw@sha256:eb7f786fcd91e72194e48fcf1ac16302d686bf8e3a71434bdbc067a6efd3fdc7 -c "mkdir -p /tmp/vgw && exec versitygw posix /tmp/vgw"
           docker run -d --name rustfs -p 9000:9000 -e RUSTFS_ACCESS_KEY=testkey -e RUSTFS_SECRET_KEY=testsecret \
-            rustfs/rustfs:latest /data
+            rustfs/rustfs@sha256:7e948dad4748bda48f8985fda7195f8cf2e4259427011f6120acc2c9acf51587 /data
           for port in 7070 9000; do
             timeout 60 sh -c "until curl -s -o /dev/null http://localhost:$port/; do sleep 1; done"
           done

@@ -249,7 +249,9 @@ impl S3Store {
             .max_redirects(0)
             .timeout_connect(Some(Duration::from_secs(15)))
             .timeout_recv_response(Some(Duration::from_secs(120)))
-            .timeout_recv_body(Some(Duration::from_secs(3600)))
+            // A total budget for the whole body, not an idle timeout: generous enough for multi-GB
+            // restores on slow links, but a stalled connection still can't hang `watch` forever.
+            .timeout_recv_body(Some(Duration::from_secs(24 * 3600)))
             .build()
             .new_agent();
         Ok(S3Store {
@@ -618,7 +620,17 @@ impl Store for S3Store {
         })?;
         match r.status().as_u16() {
             304 => Ok(Get::NotModified),
-            404 => Ok(Get::NotFound),
+            404 => match self.fail(r, &full) {
+                // Only a missing key means "no catalog yet"; NoSuchBucket etc. are configuration errors.
+                e if matches!(
+                    e.downcast_ref::<StoreError>(),
+                    Some(StoreError::NotFound(_))
+                ) =>
+                {
+                    Ok(Get::NotFound)
+                }
+                e => Err(e),
+            },
             s if (200..300).contains(&s) => {
                 let etag = header(&r, "etag").map(str::to_string);
                 let len = header(&r, "content-length").and_then(|v| v.parse().ok());

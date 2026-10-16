@@ -90,8 +90,14 @@ pub struct Prefilter {
     pub last_ok: DateTime<Utc>,
 }
 
-pub fn state_path(dirs: &Dirs, target: &str, db: &str) -> Option<PathBuf> {
-    dirs.state_dir.as_ref().map(|d| d.join(target).join(db))
+/// `<state_dir>/<target>-<location hash>/<db>`: keyed by where the target points, so a renamed
+/// bucket/prefix/endpoint (or another ad-hoc URL) never reuses another location's state.
+pub fn state_path(dirs: &Dirs, target: &Target, db: &str) -> Option<PathBuf> {
+    let loc = twox_hash::XxHash3_64::oneshot(target.store.describe().as_bytes());
+    dirs.state_dir.as_ref().map(|d| {
+        d.join(format!("{}-{:08x}", target.name, loc as u32))
+            .join(db)
+    })
 }
 
 pub fn read_prefilter(dir: &Path) -> Option<Prefilter> {
@@ -353,7 +359,7 @@ pub fn backup(job: &Job, dirs: &Dirs, force_full: bool) -> Result<Vec<(String, R
     // 1. Prefilter: targets whose last successful run saw the same stat are skipped.
     let mut todo = Vec::new();
     for (i, t) in job.targets.iter().enumerate() {
-        let sdir = state_path(dirs, &t.name, db);
+        let sdir = state_path(dirs, t, db);
         let unchanged = !force_full
             && sdir
                 .as_deref()
@@ -379,7 +385,7 @@ pub fn backup(job: &Job, dirs: &Dirs, force_full: bool) -> Result<Vec<(String, R
     let mut ts: Vec<(usize, TState)> = Vec::new();
     for i in todo {
         let t = &job.targets[i];
-        let cache = state_path(dirs, &t.name, db);
+        let cache = state_path(dirs, t, db);
         match load_catalog(&*t.store, db, cache.as_deref()) {
             Ok(mut loaded) => {
                 let hashes = std::mem::take(&mut loaded.catalog.hashes);

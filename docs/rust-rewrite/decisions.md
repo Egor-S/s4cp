@@ -268,6 +268,7 @@ during implementation, it is recorded here.
 | ListObjectsV2 field order | ⚠ versitygw sends `<LastModified>` before `<Key>`. The parser handles each `<Contents>` element as a unit. |
 | `cron` crate | ⚠ It counts days of week 1–7 starting on Sunday and has no Vixie DOM/DOW OR rule. `schedule` parses the Unix day-of-week field itself and builds two schedules when both fields are restricted. Tested. |
 | MinIO in CI | ❌ `minio/minio` (Docker Hub) and `quay.io/minio/minio` can no longer be pulled. CI uses **versitygw + RustFS** instead (D31). |
+| TLS (rustls + ring + webpki-roots) | ✅ Checked against real AWS S3 with fake credentials (virtual-hosted and path-style, from both the host binary and the distroless image; the result was `InvalidAccessKeyId`), against Backblaze B2 and Hetzner, and against healthchecks.io for pings. |
 | Budgets (D30) | ✅ The static musl binary is 8.1 MB (x86_64). The image is 18.4 MB. Max RSS: 14 MB for a full backup of a 1 GB DB (256k pages), 13 MB for a delta, 11 MB for a restore. A `watch` container under `--memory 128m` peaked at about 13 MB. |
 
 ### Deviations and additions
@@ -289,6 +290,14 @@ during implementation, it is recorded here.
   container life) are deleted.
 - **Source connection:** opened read-write without create (falling back to read-only), with `query_only` set and
   `SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`, so s4cp never checkpoints or deletes the application's WAL.
+- **Local state** lives at `<state_dir>/<target>-<hash of location>/<db>/` (prefilter.json, catalog, catalog.etag).
+  It is keyed by where the target points, so another ad-hoc URL, or a target whose bucket or prefix changed, never reuses
+  stale prefilter state.
+- **A 404 is "missing" only for `NoSuchKey`.** `NoSuchBucket` and similar errors are configuration errors, so a mistyped
+  bucket fails loudly instead of showing "no backups".
+- **HTTP timeouts:** connect 15 s, response headers 120 s, and a 24 h total budget for any body. ureq's body timeout is a
+  total budget, not an idle timeout.
+- **Restore without `--force`** refuses when `<dest>-wal` or `<dest>-journal` exists, because SQLite would replay it.
 - **Restore `--force`** also deletes the destination's `-wal`, `-shm` and `-journal`. A stale WAL would otherwise be
   replayed over the restored image.
 
